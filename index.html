@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWP04 便利貼看板</title>
+    
+    <!-- 引入 Tailwind CSS 進行快速樣式排版 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 引入 Google Fonts: 使用手寫風格字體讓便利貼更逼真 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            /* 軟木塞佈告欄風格的背景色 */
+            background-color: #e5e5f7;
+            background-image: radial-gradient(#444cf7 0.5px, transparent 0.5px), radial-gradient(#444cf7 0.5px, #e5e5f7 0.5px);
+            background-size: 20px 20px;
+            background-position: 0 0, 10px 10px;
+            overflow: hidden; /* 防止整個頁面滾動，僅在看板內操作 */
+        }
+
+        .board-container {
+            position: relative;
+            width: 100vw;
+            height: calc(100vh - 80px); /* 扣除頂部導覽列的高度 */
+            overflow: hidden;
+        }
+
+        .sticky-note {
+            position: absolute;
+            width: 250px;
+            height: 250px;
+            padding: 0;
+            box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.15);
+            display: flex;
+            flex-direction: column;
+            /* 預設些微傾斜，增加真實感 (在 JS 中會隨機微調) */
+            transition: box-shadow 0.2s, z-index 0s;
+        }
+
+        .sticky-note:hover {
+            box-shadow: 8px 8px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .note-header {
+            height: 30px;
+            cursor: grab;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            padding: 0 10px;
+            background-color: rgba(0, 0, 0, 0.05); /* 稍微深一點的頂部作為拖曳區 */
+        }
+
+        .note-header:active {
+            cursor: grabbing;
+        }
+
+        .note-content {
+            flex-grow: 1;
+            width: 100%;
+            border: none;
+            background: transparent;
+            resize: none;
+            padding: 15px;
+            outline: none;
+            font-family: 'Kalam', 'Noto Sans TC', cursive;
+            font-size: 1.25rem;
+            line-height: 1.5;
+            color: #333;
+        }
+
+        .delete-btn {
+            cursor: pointer;
+            color: rgba(0, 0, 0, 0.4);
+            font-size: 1.2rem;
+            font-weight: bold;
+            transition: color 0.2s;
+        }
+
+        .delete-btn:hover {
+            color: rgba(0, 0, 0, 0.8);
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen m-0">
+
+    <!-- 頂部控制列 -->
+    <header class="h-[80px] bg-white shadow-md flex items-center justify-between px-6 z-50">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-800">SWP04 便利貼看板</h1>
+            <p class="text-sm text-gray-500">點擊右側顏色新增便利貼，可拖曳排列與編輯</p>
+        </div>
+        
+        <div class="flex items-center gap-3">
+            <span class="text-gray-600 font-medium mr-2">新增便利貼：</span>
+            <!-- 顏色按鈕 -->
+            <button onclick="addNote('#fef08a')" class="w-10 h-10 rounded-full bg-yellow-200 border-2 border-yellow-300 shadow-sm hover:scale-110 transition-transform" title="新增黃色便利貼"></button>
+            <button onclick="addNote('#fbcfe8')" class="w-10 h-10 rounded-full bg-pink-200 border-2 border-pink-300 shadow-sm hover:scale-110 transition-transform" title="新增粉色便利貼"></button>
+            <button onclick="addNote('#bbf7d0')" class="w-10 h-10 rounded-full bg-green-200 border-2 border-green-300 shadow-sm hover:scale-110 transition-transform" title="新增綠色便利貼"></button>
+            <button onclick="addNote('#bfdbfe')" class="w-10 h-10 rounded-full bg-blue-200 border-2 border-blue-300 shadow-sm hover:scale-110 transition-transform" title="新增藍色便利貼"></button>
+            <button onclick="clearAllNotes()" class="ml-4 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors shadow-sm text-sm font-bold">清空看板</button>
+        </div>
+    </header>
+
+    <!-- 主要看板區 -->
+    <main id="board" class="board-container">
+        <!-- 便利貼將由 JavaScript 動態生成並放入此處 -->
+    </main>
+
+    <script>
+        const STORAGE_KEY = 'swp04-sticky-notes';
+        const board = document.getElementById('board');
+        
+        // 從 LocalStorage 載入資料，若無則預設為空陣列
+        let notes = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+        let maxZIndex = 1;
+
+        // 產生唯一的 ID
+        function generateId() {
+            return Date.now().toString() + Math.floor(Math.random() * 1000).toString();
+        }
+
+        // 儲存至 LocalStorage
+        function saveNotes() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+        }
+
+        // 取得當前最高的 z-index，確保新點擊的便利貼會在最上層
+        function getHighestZIndex() {
+            notes.forEach(note => {
+                if (note.zIndex > maxZIndex) {
+                    maxZIndex = note.zIndex;
+                }
+            });
+            return maxZIndex;
+        }
+
+        // 渲染單一便利貼到畫面上
+        function renderNoteElement(noteData) {
+            const noteEl = document.createElement('div');
+            noteEl.classList.add('sticky-note');
+            noteEl.id = noteData.id;
+            noteEl.style.backgroundColor = noteData.color;
+            noteEl.style.left = noteData.x + 'px';
+            noteEl.style.top = noteData.y + 'px';
+            noteEl.style.zIndex = noteData.zIndex || 1;
+            // 給予微小的隨機旋轉角度，看起來更自然
+            const randomRotation = (Math.random() - 0.5) * 4; 
+            noteEl.style.transform = `rotate(${randomRotation}deg)`;
+
+            // 便利貼的頂部拖曳區與刪除按鈕
+            const header = document.createElement('div');
+            header.classList.add('note-header');
+            
+            const deleteBtn = document.createElement('span');
+            deleteBtn.innerHTML = '&times;';
+            deleteBtn.classList.add('delete-btn');
+            deleteBtn.title = '刪除便利貼';
+            deleteBtn.onclick = () => deleteNote(noteData.id);
+            
+            header.appendChild(deleteBtn);
+
+            // 便利貼的文字輸入區
+            const textarea = document.createElement('textarea');
+            textarea.classList.add('note-content');
+            textarea.value = noteData.content;
+            textarea.placeholder = "在這裡寫下筆記...";
+            
+            // 監聽內容變更，自動儲存
+            textarea.addEventListener('input', (e) => {
+                updateNoteContent(noteData.id, e.target.value);
+            });
+
+            // 點擊文字區時也要移到最上層
+            textarea.addEventListener('mousedown', () => bringToFront(noteData.id, noteEl));
+            textarea.addEventListener('touchstart', () => bringToFront(noteData.id, noteEl), {passive: true});
+
+            noteEl.appendChild(header);
+            noteEl.appendChild(textarea);
+            board.appendChild(noteEl);
+
+            // 加入拖曳功能 (Mouse)
+            header.addEventListener('mousedown', (e) => startDrag(e, noteData.id, noteEl));
+            // 加入拖曳功能 (Touch)
+            header.addEventListener('touchstart', (e) => startDragTouch(e, noteData.id, noteEl), {passive: false});
+        }
+
+        // 初始化載入所有便利貼
+        function loadAllNotes() {
+            board.innerHTML = '';
+            maxZIndex = getHighestZIndex();
+            notes.forEach(note => renderNoteElement(note));
+        }
+
+        // 新增便利貼
+        function addNote(color) {
+            // 隨機產生初始位置，避免完全重疊
+            const randomX = Math.floor(Math.random() * (window.innerWidth - 300)) + 50;
+            const randomY = Math.floor(Math.random() * (window.innerHeight - 300)) + 20;
+            
+            maxZIndex++;
+
+            const newNote = {
+                id: generateId(),
+                content: '',
+                color: color,
+                x: randomX,
+                y: randomY,
+                zIndex: maxZIndex
+            };
+
+            notes.push(newNote);
+            saveNotes();
+            renderNoteElement(newNote);
+        }
+
+        // 更新便利貼內容
+        function updateNoteContent(id, content) {
+            const noteIndex = notes.findIndex(n => n.id === id);
+            if (noteIndex > -1) {
+                notes[noteIndex].content = content;
+                saveNotes();
+            }
+        }
+
+        // 刪除便利貼
+        function deleteNote(id) {
+            if(confirm('確定要刪除這張便利貼嗎？')) {
+                notes = notes.filter(n => n.id !== id);
+                saveNotes();
+                const noteEl = document.getElementById(id);
+                if (noteEl) noteEl.remove();
+            }
+        }
+
+        // 清空所有便利貼
+        function clearAllNotes() {
+            if(notes.length === 0) return;
+            if(confirm('確定要清空看板上的所有便利貼嗎？此動作無法復原。')) {
+                notes = [];
+                saveNotes();
+                board.innerHTML = '';
+            }
+        }
+
+        // 將便利貼移到最上層
+        function bringToFront(id, element) {
+            maxZIndex++;
+            element.style.zIndex = maxZIndex;
+            
+            const noteIndex = notes.findIndex(n => n.id === id);
+            if (noteIndex > -1) {
+                notes[noteIndex].zIndex = maxZIndex;
+                saveNotes();
+            }
+        }
+
+        // --- 拖曳功能實作 (Mouse) ---
+        let isDragging = false;
+        let currentDragNote = null;
+        let currentDragId = null;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        function startDrag(e, id, element) {
+            isDragging = true;
+            currentDragNote = element;
+            currentDragId = id;
+            
+            bringToFront(id, element);
+
+            // 計算滑鼠點擊位置與便利貼左上角的偏移量
+            const rect = element.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', stopDrag);
+        }
+
+        function drag(e) {
+            if (!isDragging || !currentDragNote) return;
+            e.preventDefault();
+            
+            // 計算新位置
+            let newX = e.clientX - offsetX;
+            let newY = e.clientY - offsetY;
+
+            // 邊界檢查 (選用，避免拖出畫面)
+            // newX = Math.max(0, Math.min(newX, window.innerWidth - currentDragNote.offsetWidth));
+            // newY = Math.max(0, Math.min(newY, window.innerHeight - 80 - currentDragNote.offsetHeight));
+
+            currentDragNote.style.left = newX + 'px';
+            currentDragNote.style.top = newY + 'px';
+        }
+
+        function stopDrag() {
+            if (!isDragging) return;
+            
+            // 儲存新位置
+            const noteIndex = notes.findIndex(n => n.id === currentDragId);
+            if (noteIndex > -1 && currentDragNote) {
+                notes[noteIndex].x = parseInt(currentDragNote.style.left);
+                notes[noteIndex].y = parseInt(currentDragNote.style.top);
+                saveNotes();
+            }
+
+            isDragging = false;
+            currentDragNote = null;
+            currentDragId = null;
+            document.removeEventListener('mousemove', drag);
+            document.removeEventListener('mouseup', stopDrag);
+        }
+
+        // --- 拖曳功能實作 (Touch - 支援手機) ---
+        function startDragTouch(e, id, element) {
+            isDragging = true;
+            currentDragNote = element;
+            currentDragId = id;
+            
+            bringToFront(id, element);
+
+            const touch = e.touches[0];
+            const rect = element.getBoundingClientRect();
+            offsetX = touch.clientX - rect.left;
+            offsetY = touch.clientY - rect.top;
+
+            document.addEventListener('touchmove', dragTouch, {passive: false});
+            document.addEventListener('touchend', stopDragTouch);
+        }
+
+        function dragTouch(e) {
+            if (!isDragging || !currentDragNote) return;
+            e.preventDefault(); // 防止滾動
+            
+            const touch = e.touches[0];
+            let newX = touch.clientX - offsetX;
+            let newY = touch.clientY - offsetY;
+
+            currentDragNote.style.left = newX + 'px';
+            currentDragNote.style.top = newY + 'px';
+        }
+
+        function stopDragTouch() {
+            if (!isDragging) return;
+            
+            // 儲存新位置
+            const noteIndex = notes.findIndex(n => n.id === currentDragId);
+            if (noteIndex > -1 && currentDragNote) {
+                notes[noteIndex].x = parseInt(currentDragNote.style.left);
+                notes[noteIndex].y = parseInt(currentDragNote.style.top);
+                saveNotes();
+            }
+
+            isDragging = false;
+            currentDragNote = null;
+            currentDragId = null;
+            document.removeEventListener('touchmove', dragTouch);
+            document.removeEventListener('touchend', stopDragTouch);
+        }
+
+        // 網頁載入完成後執行
+        window.onload = () => {
+            loadAllNotes();
+            // 如果一開始沒有便利貼，自動新增一張作為範例
+            if (notes.length === 0) {
+                addNote('#fef08a'); // 新增黃色便利貼
+            }
+        };
+    </script>
+</body>
+</html>
